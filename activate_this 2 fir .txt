@@ -1,0 +1,318 @@
+# michel/nasim/ali/arash
+import matplotlib.pyplot as plt
+from scipy.signal import butter, sosfilt, convolve, firwin, hilbert, find_peaks, filtfilt
+import numpy as np
+from numpy.fft import fft, ifft
+from statistics import mean
+import pyedflib
+
+# Load the EEG file
+file_name = 'excerpt1.prep.edf'
+file = pyedflib.EdfReader(file_name)
+
+# Read signals from the file
+main_signal = file.readSignal(0)
+manual_annotation_1 = file.readSignal(1)
+manual_annotation_2 = file.readSignal(2)
+
+# the sample rate of annotations were 10 times lower
+ann_1_extended = np.repeat(manual_annotation_1, 10)
+ann_2_extended = np.repeat(manual_annotation_2, 10)
+
+# Get signal parameters
+duration = int(file.file_duration)
+length = len(main_signal)
+fs = file.getSampleFrequency(0)
+
+# Time vector for plotting (seconds)
+t = np.linspace(0, duration, length)
+
+win_start = 50000
+#win_stop = 0
+Win_width = 5000
+win_stop = win_start + Win_width
+
+# Plot the filtered signal
+plt.figure(figsize=(12, 6))
+plt.plot(t[win_start:win_stop], main_signal[win_start:win_stop],
+         linewidth=0.5, color='black', label="Main signal")
+plt.title('Main Signal')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Amplitude')
+plt.ylim([-500, 500])
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(t[win_start:win_stop], ann_1_extended[win_start:win_stop],
+         linewidth=1, color='red', label="First")
+plt.plot(t[win_start:win_stop], ann_2_extended[win_start:win_stop],
+         linewidth=1, color='blue', linestyle="-.",
+         label="Second")
+
+plt.title('Manual annotation')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Validity')
+plt.ylim([-1, 2])
+plt.tight_layout()
+plt.show()
+
+# Design a FIR bandpass filter (1-50 Hz)
+lowcut = 15  # Lower cutoff frequency in Hz
+highcut = 15.3  # Upper cutoff frequency in Hz
+
+# Design the FIR filter using firwin
+fir_coeff = firwin(numtaps=50, cutoff=[lowcut, highcut], pass_zero='bandpass', fs=fs)
+
+# Apply the FIR filter using convolution
+fir_filtered_signal = convolve(main_signal, fir_coeff, mode='same')
+
+plt.figure(figsize=(12, 6))
+plt.plot(t[win_start:win_stop], fir_filtered_signal[win_start:win_stop], linewidth=0.5, color='green')
+
+plt.title('Filtered Sine Wave (FIR Bandpass 11-16 Hz)')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Amplitude')
+plt.ylim([-50, 50])
+plt.tight_layout()
+plt.show()
+
+# Now let's apply the 2nd-order Butterworth bandpass filter (11-16 Hz)
+nyquist = fs / 2
+# Design a 2nd-order Butterworth bandpass filter (11-16 Hz)
+low_cutoff = 11 / nyquist  # Normalized low cutoff frequency (11 Hz)
+high_cutoff = 16 / nyquist  # Normalized high cutoff frequency (16 Hz)
+
+# Create a 2nd-order Butterworth bandpass filter
+b, a = butter(2, [low_cutoff, high_cutoff], btype='band')
+# Apply the filter to the sine wave input_signal using filtfilt for zero-phase filtering
+filtered_signal = filtfilt(b, a, main_signal)
+
+# Plot the filtered signal
+plt.figure(figsize=(12, 6))
+
+plt.plot(t[win_start:win_stop], filtered_signal[win_start:win_stop], linewidth=0.5, color='blue')
+plt.title('Filtered Sine Wave (2nd-order IIR Bandpass 11-16 Hz)')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Amplitude')
+plt.ylim([-50, 50])
+plt.tight_layout()
+plt.show()
+
+#we continued with FIR filter
+
+
+# Perform FFT on the windowed segment
+
+Y = fft(main_signal[win_start:win_stop])
+
+NN = len(Y)
+freqsY = np.fft.fftfreq(NN, 1 / fs)
+positive_freqsY = freqsY[:NN // 2]
+positive_Y = np.abs(Y[:NN // 2])
+
+X = fft(fir_filtered_signal[win_start:win_stop])
+
+# Calculate the corresponding frequency bins
+N = len(X)
+freqs = np.fft.fftfreq(N, 1 / fs)
+
+# Take only the positive half of the frequencies (up to Nyquist frequency)
+positive_freqs = freqs[:N // 2]
+positive_X = np.abs(X[:N // 2])
+
+# Plot FFT
+plt.figure(figsize=(12, 6))
+
+# Plot the FFT magnitude
+plt.subplot(121)
+plt.stem(positive_freqs, positive_X, 'b', markerfmt=" ", basefmt="-b")
+plt.ylim([0, 500])
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('FFT Amplitude Filtered signal')
+plt.xlim(0, fs / 2)  # Limit to Nyquist frequency
+
+# Plot the reconstructed signal from IFFT (just for reference)
+plt.subplot(122)
+#reconstructed_signal = ifft(X)
+plt.stem(positive_freqsY, positive_Y, 'b', markerfmt=" ", basefmt="-b")
+plt.ylim([0, 5000])
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('FFT Amplitude Main signal')
+plt.xlim(0, fs / 2)  # Limit to Nyquist frequency
+plt.tight_layout()
+plt.show()
+
+#///////////////////////////////////////
+
+
+# Perform FFT on the windowed segment
+
+Y = fft(main_signal[win_start:win_stop])
+
+NN = len(Y)
+freqsY = np.fft.fftfreq(NN, 1 / fs)
+positive_freqsY = freqsY[:NN // 2]
+positive_Y = np.abs(Y[:NN // 2])
+
+X = fft(filtered_signal[win_start:win_stop])
+
+# Calculate the corresponding frequency bins
+N = len(X)
+freqs = np.fft.fftfreq(N, 1 / fs)
+
+# Take only the positive half of the frequencies (up to Nyquist frequency)
+positive_freqs = freqs[:N // 2]
+positive_X = np.abs(X[:N // 2])
+
+# Plot FFT
+plt.figure(figsize=(12, 6))
+
+# Plot the FFT magnitude
+plt.subplot(121)
+plt.stem(positive_freqs, positive_X, 'b', markerfmt=" ", basefmt="-b")
+plt.ylim([0, 500])
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('FFT Amplitude Filtered signal')
+plt.xlim(0, fs / 2)  # Limit to Nyquist frequency
+
+# Plot the reconstructed signal from IFFT (just for reference)
+plt.subplot(122)
+#reconstructed_signal = ifft(X)
+plt.stem(positive_freqsY, positive_Y, 'b', markerfmt=" ", basefmt="-b")
+plt.ylim([0, 5000])
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('FFT Amplitude Main signal')
+plt.xlim(0, fs / 2)  # Limit to Nyquist frequency
+plt.tight_layout()
+plt.show()
+
+# Apply the Hilbert transform to the filtered signal (not squared)
+analytic_signal = hilbert(fir_filtered_signal[win_start:win_stop])
+
+# Calculate the envelope (magnitude of the analytic signal)
+envelope = np.abs(analytic_signal)
+
+# Plot the filtered signal and its envelope
+plt.figure(figsize=(12, 6))
+
+# Plot the filtered signal
+plt.plot(t[win_start:win_stop], fir_filtered_signal[win_start:win_stop], linewidth=0.5, color='blue',
+         label="Filtered Signal")
+
+# Plot the envelope
+plt.plot(t[win_start:win_stop], envelope, linewidth=1, color='orange', label="Envelope")
+
+# Add titles and labels
+plt.title('Filtered Signal and Envelope')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Amplitude')
+plt.legend()
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+mean_en = mean(envelope)
+en1 = envelope - mean_en
+
+plt.figure(figsize=(12, 6))
+
+# Plot the filtered signal
+plt.plot(t[win_start:win_stop], fir_filtered_signal[win_start:win_stop], linewidth=0.5, color='blue',
+         label="Filtered Signal")
+en2 = en1 ** 2
+# Plot the envelope
+plt.plot(t[win_start:win_stop], en2, linewidth=1, color='orange', label="Envelope1")
+
+# Add titles and labels
+plt.title('Filtered Signal and Envelope')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+
+
+
+
+peaks, _ = find_peaks(en2, distance=200)
+# difference between peaks is >= 150
+#print(np.diff(peaks))
+
+
+mx2 = mean(en2)
+threshold =5* mx2
+high_values_indices = np.where(en2 > threshold)[0]
+high_values_times = t[win_start:win_stop][high_values_indices]
+high_values_amplitudes = en2[high_values_indices]
+
+# Plot asterisks at points above the threshold
+plt.scatter(high_values_times, high_values_amplitudes, color='black', marker='*', s=20, label='Amplitude > 300')
+
+plt.figure(figsize=(12, 6))
+
+#plt.plot(t[win_start:win_stop], 300 * ann_1_extended[win_start:win_stop], linewidth=1, color='black')
+#plt.plot(t[win_start:win_stop], en2, linewidth=1, color='black')
+plt.plot(en2)
+
+
+plt.plot(high_values_times, high_values_amplitudes, linewidth=0.5, color='blue', label="Filtered Signal")
+
+plt.plot(t[win_start:win_stop], en2, linewidth=1, color='orange', label="Envelope1")
+plt.plot(t[win_start:win_stop],300* ann_1_extended[win_start:win_stop],
+         linewidth=1, color='red', label="First")
+plt.plot(t[win_start:win_stop],300* ann_2_extended[win_start:win_stop],
+         linewidth=1, color='blue', linestyle="-.",
+         label="Second")
+plt.plot(peaks, en2[peaks], "x")
+plt.show()
+
+# Raise the filtered signal to the power of 2 (element-wise squaring)
+
+maxx = max(en2)
+mx2 = maxx / 100
+
+threshold = mx2
+high_values_indices = np.where(en2[win_start:win_stop] > threshold)[0]
+high_values_times = t[win_start:win_stop][high_values_indices]
+high_values_amplitudes = en2[high_values_indices]
+
+plt.figure(figsize=(12, 6))
+
+# Plot the filtered signal
+plt.plot(high_values_times, high_values_amplitudes, linewidth=0.5, color='blue', label="Filtered Signal")
+
+plt.plot(t[win_start:win_stop], en2, linewidth=1, color='orange', label="Envelope1")
+plt.plot(t[win_start:win_stop],300* ann_1_extended[win_start:win_stop],
+         linewidth=1, color='red', label="First")
+plt.plot(t[win_start:win_stop],300* ann_2_extended[win_start:win_stop],
+         linewidth=1, color='blue', linestyle="-.",
+         label="Second")
+
+
+
+
+
+
+mx2 = mean(en2)
+threshold =5* mx2
+high_values_indices = np.where(en2 > threshold)[0]
+high_values_times = t[win_start:win_stop][high_values_indices]
+high_values_amplitudes = en2[high_values_indices]
+
+
+
+
+
+
+plt.scatter(high_values_times, high_values_amplitudes, color='black', marker='*', s=100, label='Amplitude > 300')
+
+# Add titles and labels
+plt.title('Filtered Signal and Envelope')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.tight_layout()
+plt.show()
