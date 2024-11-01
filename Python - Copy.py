@@ -47,32 +47,121 @@ def read_signal(file_name, win_s, win_width):
 
 # Spindle detection function with enhanced method (SWPE-E)
 def detect_spindles(eeg, fs):
-    # Parameters
+    #////////////////////////////////
+
+    #time = np.linspace(0, 50, 10000, endpoint=False)
+
+    #eeg =1* np.sin(2 * np.pi * 13 * time)
+
+    # eeg=  np.zeros(1000)
+    # eeg[130:170] = 1
+    # spindle_coeffs=  np.linspace(0, 50, 50, endpoint=False)
+    # spindle_coeffs[45:50] = 200
+    #
+    #
+    # xsx=np.sort(spindle_coeffs)
+    # dd=len(xsx)
+    #
+    # thr=xsx[int(0.81*len(xsx))]
+    # threshold = np.percentile(spindle_coeffs, 81)  # Top 3% of wavelet coefficients
+
+    #//////////////////////
+    # Define parameters
     spindle_freq_range = (11, 16)  # Frequency range of spindles (Hz)
+    detection_freq_range = (8, 25)  # Frequency range for spindle detection (Hz)
+    freq_resolution = 2  # Desired frequency resolution (Hz)
     wavelet_name = 'mexh'  # Mexican Hat Wavelet for CWT
-    min_duration = 0.03  # Minimum spindle duration in seconds
+    min_duration = 0.01  # Minimum spindle duration in seconds
+
+    # Example EEG signal and sampling frequency (fs)
+    # Ensure that `eeg` is a valid 1D numpy array and `fs` is defined
+    # eeg = np.array(...)  # Your EEG signal here
+    # fs = ...  # Your sampling frequency here
 
     # Step 1: Continuous Wavelet Transform (CWT) for EEG signal
-    scales = np.arange(1, 129)  # Scales for CWT
-    coefficients, freqs = pywt.cwt(eeg, scales, wavelet_name, 1.0 / fs)
+    frequencies = np.arange(detection_freq_range[0], detection_freq_range[1], freq_resolution)
+    scales = 1.0 / (frequencies * (1.0 / fs))  # Convert frequencies to scales
 
-    # Focus on the spindle frequency range (11-16 Hz)
-    spindle_coeffs = np.abs(coefficients[(freqs >= spindle_freq_range[0]) & (freqs <= spindle_freq_range[1]), :])
+    # Set a minimum scale threshold
+    min_scale = 1.0  # Minimum scale (adjust as needed)
+    scales = scales[scales >= min_scale]  # Filter out scales that are too small
 
-    # Step 2: Sliding window to detect spindle candidates based on top 3% of wavelet coefficients
+    scales = np.arange(1, 3, 0.01)
+    # Check if scales are still valid
+    if scales.size == 0:
+        raise ValueError("No valid scales available for CWT. Check the frequency range and resolution.")
+
+    # Perform the CWT with adjusted scales
+    coefficients, freqs = pywt.cwt(eeg, [3.7], wavelet_name, 1.0 / fs, 'conv')
+
+    # Check if freqs has values in the spindle frequency range
+    #if not np.any((freqs >= spindle_freq_range[0]) & (freqs <= spindle_freq_range[1])):
+    #    raise ValueError(
+    #        "No frequencies found in the specified spindle range (11-16 Hz). Check scales or input signal.")
+
+    # Select coefficients in the spindle frequency range
+    spindle_coeffs_indices = np.where((freqs >= spindle_freq_range[0]) & (freqs <= spindle_freq_range[1]))[0]
+    #if spindle_coeffs_indices.size == 0:
+    #    raise ValueError(
+    #        "No coefficients found in the specified spindle range (11-16 Hz). Adjust frequency filtering parameters.")
+
+    # Extract the relevant spindle coefficients
+    spindle_coeffs = np.abs(coefficients[spindle_coeffs_indices, :])
+
+    spindle_coeffs = abs(coefficients)
+
+    #plt.plot(coefficients[0, 100:200], label='Spindle Coefficients at scale 2')  # Adjust index as needed
+    plt.plot(spindle_coeffs[0, 0:5000], label='Spindle Coefficients at scale 2')  # Adjust index as needed
+    #plt.plot(eeg[100:200], label='Spindle Coefficients at scale 2')  # Adjust index as needed
+    plt.title("Spindle Coefficients for Specific Scale")
+    plt.xlabel("Time")
+    plt.ylabel("Coefficient Amplitude")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+    # Check if spindle_coeffs is non-empty before proceeding
+    if spindle_coeffs.size == 0:
+        raise ValueError("Spindle coefficients are empty after frequency filtering. Check CWT parameters.")
+
+    # Continue with thresholding if spindle_coeffs has valid data
+    threshold = np.percentile(spindle_coeffs, 99)  # Top 3% of wavelet coefficients
+    threshold=80
     binary_signal = np.zeros(eeg.shape)
-    threshold = np.percentile(spindle_coeffs, 90)  # Top 3% of wavelet coefficients
     binary_signal[spindle_coeffs.max(axis=0) >= threshold] = 1
 
-    # Plot the binary detection (spindle candidates)
-    # plt.figure(figsize=(12, 4))
-    # plt.plot(binary_signal, label='Binary Detection (Spindle Candidates)', color='red')
-    # plt.plot(ann_1_win, color='blue')
-    # plt.plot(ann_2_win, color='black')
-    # plt.title('Binary Spindle Detection')
-    # plt.xlabel('Time (s)')
-    # plt.ylabel('Binary Signal')
-    # plt.show()
+    # Step 4: Detect spindle events from candidates and envelope
+    spindle_candidates = np.where(binary_signal == 1)[0]  # Indices of spindle candidates
+    spindles = []  # List to store detected spindles
+    max_gap = .01  # Maximum gap in seconds to merge segments
+    min_duration = 0.01  # Minimum spindle duration in seconds
+    min_samples = int(min_duration * fs)  # Convert minimum duration to samples
+
+    # Merge spindle detections
+    if len(spindle_candidates) > 0:
+        current_spindle = [spindle_candidates[0]]  # Start with the first candidate
+
+        for i in range(1, len(spindle_candidates)):
+            # Calculate time difference between current and previous index
+            time_diff = (spindle_candidates[i] - spindle_candidates[i - 1]) / fs
+
+            # Check if the gap is within the max_gap threshold
+            if time_diff <= max_gap:
+                current_spindle.append(spindle_candidates[i])
+            else:
+                # If current_spindle has enough samples, calculate start time and duration
+                if len(current_spindle) >= min_samples:
+                    start_time = current_spindle[0] / fs  # Convert to seconds
+                    duration = (len(current_spindle) / fs)  # Duration in seconds
+                    spindles.append([start_time, duration])
+                current_spindle = [spindle_candidates[i]]  # Start a new spindle
+
+        # Handle the last spindle if it meets the criteria
+        if len(current_spindle) >= min_samples:
+            start_time = current_spindle[0] / fs
+            duration = (len(current_spindle) / fs)
+            spindles.append([start_time, duration])
+
+    # The spindles list now contains the start times and durations of detected spindles
 
     # Step 3: Rectified Envelope Method for spindle validation (EXTRA)
     # Apply bandpass filter for spindle frequency range
@@ -93,33 +182,6 @@ def detect_spindles(eeg, fs):
     b, a = butter(4, normal_cutoff, btype='low')
 
     smoothed_envelope = filtfilt(b, a, envelope)  # Low-pass filter with 2 Hz cutoff
-
-    # Step 4: Detect spindle events from candidates and envelope
-    spindle_candidates = np.where(binary_signal == 1)[0]  # Indices of spindle candidates
-    spindles = []  # List to store detected spindles
-
-    min_samples = int(min_duration * fs)  # Convert minimum spindle duration to samples
-
-    # Group continuous spindle candidate indices into spindle events
-    if len(spindle_candidates) > 0:
-        current_spindle = [spindle_candidates[0]]
-        for i in range(1, len(spindle_candidates)):
-            # If the current candidate is contiguous with the previous one
-            if spindle_candidates[i] - spindle_candidates[i - 1] == 1:
-                current_spindle.append(spindle_candidates[i])
-            else:
-                # If the duration of the spindle is long enough, store it
-                if len(current_spindle) >= min_samples:
-                    start_time = current_spindle[0] / fs  # Convert start sample to time (seconds)
-                    duration = len(current_spindle) / fs  # Convert length to time (seconds)
-                    spindles.append([start_time, duration])
-                current_spindle = [spindle_candidates[i]]  # Start a new spindle
-
-        # Handle the last spindle (if it meets the criteria)
-        if len(current_spindle) >= min_samples:
-            start_time = current_spindle[0] / fs
-            duration = len(current_spindle) / fs
-            spindles.append([start_time, duration])
 
     # Return the detected spindles and the filtered signal
     return np.array(spindles), filtered_signal, smoothed_envelope
@@ -158,19 +220,17 @@ def calculate_metrics(detected_spindles, manual_annotation):
 
 # Plotting function for spindles
 def plot_spindles(eeg, fs, spindles, ann_1_win, filtered_eeg, envelope_eeg):
-
-
     # Generate the time axis in seconds for plotting
     time = np.arange(0, len(eeg)) / fs
 
     plt.figure(figsize=(15, 8))
     # Plot detected spindles on the filtered signal
     # plt.subplot(3, 1, 3)
-    plt.plot(time, eeg, label='Orginal Signal', color='orange')
-    plt.plot(time, ann_1_win * 60, label='annotate spindle', color='black')
+    #plt.plot(time, eeg, label='Orginal Signal', color='orange')
+    plt.plot(time, ann_1_win * 30, label='annotate spindle', color='black')
     plt.plot(time, filtered_eeg, label='filtered Signal', color='red')
     plt.plot(time, envelope_eeg, label='envelope Signal', color='blue')
-
+    #plt.plot(time, coe, label='envelope Signal', color='orange')
     # Highlight detected spindles
     for spindle in spindles:
         start_time, duration = spindle
@@ -192,7 +252,7 @@ def plot_spindles(eeg, fs, spindles, ann_1_win, filtered_eeg, envelope_eeg):
 
 # Example usage of the script
 if __name__ == "__main__":
-    eeg, fs, ann_1_win, ann_2_win = read_signal('excerpt1.prep.edf', win_s=60000, win_width=5000)
+    eeg, fs, ann_1_win, ann_2_win = read_signal('excerpt1.prep.edf', win_s=0, win_width=180000)
     # Detect spindles in EEG signal
     spindles, filtered_eeg, envelop_eeg = detect_spindles(eeg, fs)
 
@@ -214,4 +274,3 @@ if __name__ == "__main__":
     plot_spindles(eeg, fs, spindles, ann_1_win, filtered_eeg, envelop_eeg)
 
     plot_spindles(eeg, fs, spindles, ann_2_win, filtered_eeg, envelop_eeg)
-
